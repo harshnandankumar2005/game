@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kingdom's Last Stand – LUDUSFORGE 2026</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --gold: #f4c542; --dark-gold: #b8860b; --hero-blue: #4488ff; --villain-red: #ff3333;
+  }
+  body { background: #0a0a0a; font-family: 'Crimson Text', serif; overflow: hidden; width: 100vw; height: 100vh; }
+
+  /* LOGIN PAGE */
+  #login-page { position: absolute; inset: 0; background: radial-gradient(circle, #1a0a00, #000); display: flex; align-items: center; justify-content: center; z-index: 100; transition: opacity 0.8s; }
+  .login-box { background: #0d0900; border: 2px solid var(--dark-gold); padding: 40px; width: 400px; text-align: center; box-shadow: 0 0 30px rgba(184,134,11,0.3); }
+  .game-logo { font-family: 'Cinzel', serif; color: var(--gold); font-size: 24px; margin-bottom: 20px; }
+  .login-field { width: 100%; padding: 12px; margin-bottom: 10px; background: #000; border: 1px solid var(--dark-gold); color: #fff; outline: none; }
+  .login-btn { width: 100%; padding: 12px; background: var(--dark-gold); border: none; color: #fff; font-family: 'Cinzel', serif; cursor: pointer; font-weight: bold; margin-top: 10px; }
+  
+  /* GAME PAGE */
+  #game-page { position: absolute; inset: 0; display: none; flex-direction: column; }
+  #hud { height: 70px; background: #0f0800; border-bottom: 2px solid var(--dark-gold); display: flex; align-items: center; justify-content: space-around; color: var(--gold); padding: 0 20px; z-index: 10; }
+  .health-bar-container { text-align: center; }
+  .health-bar { width: 150px; height: 12px; background: #222; border: 1px solid var(--gold); margin-top: 5px; }
+  .health-fill { height: 100%; transition: width 0.2s; width: 100%; }
+  #game-canvas-wrap { flex: 1; position: relative; background: #000; }
+  canvas { width: 100%; height: 100%; display: block; }
+
+  /* SCREENS */
+  #select-screen { position: absolute; inset: 0; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 50; }
+  .char-cards { display: flex; gap: 40px; margin-top: 20px; }
+  .char-card { padding: 20px; border: 2px solid #444; cursor: pointer; text-align: center; transition: 0.3s; background: #111; color: #fff; width: 220px; }
+  .char-card:hover { border-color: var(--gold); transform: scale(1.05); }
+  .overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); display: none; flex-direction: column; align-items: center; justify-content: center; color: #fff; z-index: 60; text-align: center; }
+</style>
+</head>
+<body>
+
+<div id="login-page">
+  <div class="login-box">
+    <div class="game-logo">⚔ KINGDOM'S LAST STAND ⚔</div>
+    <input class="login-field" id="username" type="text" placeholder="Warrior Name (admin)">
+    <input class="login-field" id="password" type="password" placeholder="Secret Word (1234)">
+    <button class="login-btn" onclick="doLogin()">ENTER REALM</button>
+    <p id="login-error" style="color:red; margin-top:10px; font-size:14px;"></p>
+  </div>
+</div>
+
+<div id="game-page">
+  <div id="hud">
+    <div class="health-bar-container">
+        <span>PALADIN HP: <b id="hero-hp-txt">100</b></span>
+        <div class="health-bar"><div id="hero-health-bar" class="health-fill" style="background:var(--hero-blue);"></div></div>
+    </div>
+    <div style="text-align:center">WAVE: <b id="wave-num">1</b> | SCORE: <b id="score-num">0</b><br><small>Shift: Block Damage</small></div>
+    <div class="health-bar-container">
+        <span>NECROMANCER HP: <b id="villain-hp-txt">150</b></span>
+        <div class="health-bar"><div id="villain-health-bar" class="health-fill" style="background:var(--villain-red);"></div></div>
+    </div>
+  </div>
+
+  <div id="game-canvas-wrap">
+    <canvas id="gameCanvas"></canvas>
+    <div id="select-screen">
+      <h2 style="color:var(--gold); font-family:Cinzel; font-size: 30px;">CHOOSE THY CHAMPION</h2>
+      <div class="char-cards">
+        <div class="char-card" onclick="startGame('hero')"><h2>🧙‍♂️</h2><p>PALADIN (You)</p><small>Arrows: Move/Jump<br>Space: Shoot | Shift: Block</small></div>
+        <div class="char-card" onclick="startGame('villain')"><h2>🧛</h2><p>NECROMANCER (You)</p><small>WASD: Move/Jump<br>F: Shoot | Shift: Block</small></div>
+      </div>
+    </div>
+    <div id="game-overlay" class="overlay"></div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let W, H, GROUND, playerChoice = 'hero', gameState = 'login', wave = 1, score = 0, animId;
+let hero, villain, projectiles = [], enemies = [], platforms = [];
+
+// --- SOUND ENGINE ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playSound(freq, type, duration) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type; osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + duration);
+}
+
+function doLogin() {
+    const u = document.getElementById('username').value.toLowerCase();
+    const p = document.getElementById('password').value;
+    if((u === 'admin' && p === '1234') || (u !== '' && p.length >= 3)) {
+        document.getElementById('login-page').style.opacity = '0';
+        setTimeout(() => {
+            document.getElementById('login-page').style.display = 'none';
+            document.getElementById('game-page').style.display = 'flex';
+            resize();
+        }, 800);
+    } else { document.getElementById('login-error').innerText = "Wrong spell! (Try admin/1234)"; }
+}
+
+function resize() {
+    W = canvas.parentElement.clientWidth; H = canvas.parentElement.clientHeight;
+    canvas.width = W; canvas.height = H; GROUND = H - 80;
+    platforms = [{ x: W*0.15, y: GROUND-120, w: 150, h: 15 }, { x: W*0.4, y: GROUND-220, w: 200, h: 15 }, { x: W*0.7, y: GROUND-120, w: 150, h: 15 }];
+}
+
+function initGameObjects() {
+    hero = { x: 100, y: GROUND, w: 40, h: 55, vx: 0, vy: 0, hp: 100, maxHp: 100, dir: 1, onGround: false, cooldown: 0, blocking: false };
+    villain = { x: W-150, y: GROUND, w: 45, h: 60, vx: 0, vy: 0, hp: 150, maxHp: 150, dir: -1, onGround: false, cooldown: 0, blocking: false };
+    projectiles = []; enemies = []; wave = 1; score = 0;
+    spawnEnemies();
+}
+
+function spawnEnemies() {
+    for(let i=0; i < wave + 1; i++) {
+        enemies.push({ x: Math.random()*W, y: -50, w: 35, h: 45, hp: 20, vx: (Math.random()-0.5)*3, vy: 0, onGround: false });
+    }
+}
+
+const keys = {};
+window.onkeydown = (e) => keys[e.code] = true;
+window.onkeyup = (e) => keys[e.code] = false;
+
+function applyPhysics(obj) {
+    obj.vy += 0.7; obj.x += obj.vx; obj.y += obj.vy;
+    if(obj.y >= GROUND) { obj.y = GROUND; obj.vy = 0; obj.onGround = true; }
+    platforms.forEach(p => {
+        if(obj.vy > 0 && obj.x+obj.w > p.x && obj.x < p.x+p.w && obj.y >= p.y && obj.y <= p.y+p.h) {
+            obj.y = p.y; obj.vy = 0; obj.onGround = true;
+        }
+    });
+    if(obj.x < 0) obj.x = 0; if(obj.x > W-obj.w) obj.x = W-obj.w;
+}
+
+function update() {
+    if(gameState !== 'playing') return;
+
+    // Player Controls & Blocking
+    if(playerChoice === 'hero') {
+        hero.blocking = keys['ShiftLeft'] || keys['ShiftRight'];
+        hero.vx = hero.blocking ? 0 : (keys['ArrowLeft'] ? -5 : (keys['ArrowRight'] ? 5 : 0));
+        if(keys['ArrowLeft']) hero.dir = -1; if(keys['ArrowRight']) hero.dir = 1;
+        if(keys['ArrowUp'] && hero.onGround) { hero.vy = -14; hero.onGround = false; playSound(300, 'square', 0.1); }
+        if(keys['Space'] && hero.cooldown <= 0 && !hero.blocking) { fire(hero, 'hero'); hero.cooldown = 25; }
+        
+        // Villain AI
+        let dist = hero.x - villain.x;
+        villain.vx = dist > 50 ? 3 : (dist < -50 ? -3 : 0);
+        villain.dir = dist > 0 ? 1 : -1;
+        if(Math.random() < 0.02 && villain.cooldown <= 0) fire(villain, 'villain');
+    } else {
+        villain.blocking = keys['ShiftLeft'] || keys['ShiftRight'];
+        villain.vx = villain.blocking ? 0 : (keys['KeyA'] ? -5 : (keys['KeyD'] ? 5 : 0));
+        if(keys['KeyA']) villain.dir = -1; if(keys['KeyD']) villain.dir = 1;
+        if(keys['KeyW'] && villain.onGround) { villain.vy = -14; villain.onGround = false; playSound(200, 'sawtooth', 0.1); }
+        if(keys['KeyF'] && villain.cooldown <= 0 && !villain.blocking) { fire(villain, 'villain'); villain.cooldown = 25; }
+
+        // Hero AI
+        let dist = villain.x - hero.x;
+        hero.vx = dist > 50 ? 3 : (dist < -50 ? -3 : 0);
+        hero.dir = dist > 0 ? 1 : -1;
+        if(Math.random() < 0.02 && hero.cooldown <= 0) fire(hero, 'hero');
+    }
+
+    if(hero.cooldown > 0) hero.cooldown--;
+    if(villain.cooldown > 0) villain.cooldown--;
+
+    applyPhysics(hero); applyPhysics(villain);
+    enemies.forEach(en => {
+        applyPhysics(en);
+        if(Math.abs(en.x - (playerChoice==='hero'?hero.x:villain.x)) < 30) {
+            if(playerChoice==='hero' && !hero.blocking) hero.hp -= 0.1;
+            if(playerChoice==='villain' && !villain.blocking) villain.hp -= 0.1;
+        }
+    });
+
+    // Projectiles logic
+    for(let i = projectiles.length - 1; i >= 0; i--) {
+        let p = projectiles[i]; p.x += p.vx;
+        // Hit Hero?
+        if (p.type === 'villain' && p.x > hero.x && p.x < hero.x + hero.w && p.y > hero.y - hero.h && p.y < hero.y) {
+            hero.hp -= hero.blocking ? 2 : 15; projectiles.splice(i, 1);
+            playSound(150, 'sine', 0.2); if(hero.hp <= 0) endGame("💀 THE NECROMANCER CONQUERS! 💀"); continue;
+        }
+        // Hit Villain?
+        if (p.type === 'hero' && p.x > villain.x && p.x < villain.x + villain.w && p.y > villain.y - villain.h && p.y < villain.y) {
+            villain.hp -= villain.blocking ? 2 : 15; projectiles.splice(i, 1);
+            playSound(150, 'sine', 0.2); if(villain.hp <= 0) endGame("🏆 THE PALADIN PREVAILS! 🏆"); continue;
+        }
+        if(p.x < 0 || p.x > W) projectiles.splice(i, 1);
+    }
+
+    if(enemies.length === 0 && wave < 5) { wave++; spawnEnemies(); }
+    draw();
+    animId = requestAnimationFrame(update);
+}
+
+function fire(p, type) {
+    projectiles.push({ x: p.x + p.w/2, y: p.y - p.h/2, vx: p.dir*12, vy: 0, type });
+    playSound(type === 'hero' ? 880 : 440, 'triangle', 0.1);
+}
+
+function draw() {
+    ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#1a1a1a'; ctx.fillRect(0, GROUND, W, H-GROUND); 
+    platforms.forEach(p => { ctx.fillStyle = '#444'; ctx.fillRect(p.x, p.y, p.w, p.h); });
+
+    // Draw Characters
+    ctx.fillStyle = hero.blocking ? '#fff' : 'blue'; 
+    ctx.fillRect(hero.x, hero.y-hero.h, hero.w, hero.h);
+    ctx.fillStyle = villain.blocking ? '#fff' : 'red';
+    ctx.fillRect(villain.x, villain.y-villain.h, villain.w, villain.h);
+    
+    enemies.forEach(en => { ctx.fillStyle = '#555'; ctx.fillRect(en.x, en.y-en.h, en.w, en.h); });
+    projectiles.forEach(pr => {
+        ctx.fillStyle = pr.type === 'hero' ? '#00ffff' : '#ff00ff';
+        ctx.beginPath(); ctx.arc(pr.x, pr.y, 6, 0, Math.PI*2); ctx.fill();
+    });
+
+    document.getElementById('hero-hp-txt').innerText = Math.ceil(hero.hp);
+    document.getElementById('hero-health-bar').style.width = (hero.hp / hero.maxHp * 100) + '%';
+    document.getElementById('villain-hp-txt').innerText = Math.ceil(villain.hp);
+    document.getElementById('villain-health-bar').style.width = (villain.hp / villain.maxHp * 100) + '%';
+    document.getElementById('score-num').innerText = score;
+    document.getElementById('wave-num').innerText = wave;
+}
+
+function startGame(choice) {
+    playerChoice = choice;
+    document.getElementById('select-screen').style.display = 'none';
+    gameState = 'playing';
+    initGameObjects();
+    update();
+}
+
+function endGame(msg) {
+    gameState = 'over';
+    cancelAnimationFrame(animId);
+    const ov = document.getElementById('game-overlay');
+    ov.style.display = 'flex';
+    ov.innerHTML = `<h1 style="color:var(--gold); font-size:40px;">${msg}</h1><button class="login-btn" onclick="location.reload()" style="padding:15px 30px; width:auto;">PLAY AGAIN</button>`;
+}
+
+window.onresize = resize;
+</script>
+</body>
+</html>
